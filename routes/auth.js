@@ -238,3 +238,50 @@ router.post('/refresh', authenticateToken, (req, res) => {
 });
 
 module.exports = router;
+
+// OAuth: Exchange Supabase access token for app JWT
+router.post('/oauth', async (req, res) => {
+  try {
+    const bearer = req.headers['authorization'];
+    const accessToken = req.body?.accessToken || (bearer ? bearer.split(' ')[1] : null);
+
+    if (!accessToken) {
+      return res.status(400).json({ error: 'Missing access token' });
+    }
+
+    // Validate token and fetch user from Supabase
+    const { data: userResp, error: userErr } = await supabaseAdmin.auth.getUser(accessToken);
+    if (userErr || !userResp?.user) {
+      return res.status(401).json({ error: 'Invalid Supabase token' });
+    }
+
+    const authUser = userResp.user;
+
+    // Ensure profile exists (upsert)
+    const { data: profile, error: profileError } = await supabaseAdmin
+      .from('profiles')
+      .upsert({ id: authUser.id, email: authUser.email || null }, { onConflict: 'id' })
+      .select('*')
+      .single();
+
+    if (profileError) {
+      return res.status(500).json({ error: 'Failed to ensure user profile' });
+    }
+
+    const token = generateToken(profile.id);
+
+    return res.json({
+      message: 'OAuth login successful',
+      token,
+      user: {
+        id: profile.id,
+        email: profile.email,
+        fullName: profile.full_name,
+        avatarUrl: profile.avatar_url
+      }
+    });
+  } catch (error) {
+    console.error('OAuth exchange error:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});

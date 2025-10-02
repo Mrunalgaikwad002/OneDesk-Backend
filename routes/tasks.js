@@ -485,7 +485,8 @@ router.put('/tasks/:taskId', [
   body('assignedTo').optional().isUUID(),
   body('dueDate').optional().isISO8601(),
   body('completed').optional().isBoolean(),
-  body('position').optional().isInt({ min: 0 })
+  body('position').optional().isInt({ min: 0 }),
+  body('listId').optional().isUUID()
 ], async (req, res) => {
   try {
     const errors = validationResult(req);
@@ -536,6 +537,7 @@ router.put('/tasks/:taskId', [
     if (updates.dueDate !== undefined) updateData.due_date = updates.dueDate;
     if (updates.completed !== undefined) updateData.completed = updates.completed;
     if (updates.position !== undefined) updateData.position = updates.position;
+    if (updates.listId !== undefined) updateData.list_id = updates.listId;
 
     // Update task
     const { data: updatedTask, error: updateError } = await supabaseAdmin

@@ -188,34 +188,216 @@ const setupSocketHandlers = (io) => {
       socket.emit('chat_room_left', { roomId });
     });
 
-    // Handle task updates
-    socket.on('task_updated', async (data) => {
+    // Handle task board operations
+    socket.on('join_task_board', async (data) => {
       try {
-        const { taskId, updates, workspaceId } = data;
+        const { boardId } = data;
 
-        // Verify user has access to the workspace
-        const { data: membership, error } = await supabaseAdmin
-          .from('workspace_members')
-          .select('id')
-          .eq('workspace_id', workspaceId)
-          .eq('user_id', socket.userId)
+        // Verify user has access to the board
+        const { data: board, error } = await supabaseAdmin
+          .from('task_boards')
+          .select(`
+            workspace_id,
+            workspace_members:workspace_id!inner(user_id)
+          `)
+          .eq('id', boardId)
+          .eq('workspace_members.user_id', socket.userId)
           .single();
 
-        if (error || !membership) {
-          socket.emit('error', { message: 'Access denied to workspace' });
+        if (error || !board) {
+          socket.emit('error', { message: 'Access denied to task board' });
           return;
         }
 
-        // Broadcast task update to workspace members
-        socket.to(`workspace:${workspaceId}`).emit('task_updated', {
+        socket.join(`board:${boardId}`);
+        socket.emit('task_board_joined', { boardId });
+
+      } catch (error) {
+        console.error('Join task board error:', error);
+        socket.emit('error', { message: 'Failed to join task board' });
+      }
+    });
+
+    socket.on('leave_task_board', (boardId) => {
+      socket.leave(`board:${boardId}`);
+      socket.emit('task_board_left', { boardId });
+    });
+
+    // Real-time task operations
+    socket.on('task_created', async (data) => {
+      try {
+        const { boardId, listId, task } = data;
+
+        // Verify access
+        const { data: board, error } = await supabaseAdmin
+          .from('task_boards')
+          .select('workspace_id')
+          .eq('id', boardId)
+          .single();
+
+        if (error || !board) return;
+
+        const { data: membership } = await supabaseAdmin
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', board.workspace_id)
+          .eq('user_id', socket.userId)
+          .single();
+
+        if (!membership) return;
+
+        // Broadcast to board members
+        socket.to(`board:${boardId}`).emit('task_created', {
+          boardId,
+          listId,
+          task,
+          createdBy: socket.user
+        });
+
+      } catch (error) {
+        console.error('Task created broadcast error:', error);
+      }
+    });
+
+    socket.on('task_updated', async (data) => {
+      try {
+        const { boardId, taskId, updates } = data;
+
+        // Verify access
+        const { data: board, error } = await supabaseAdmin
+          .from('task_boards')
+          .select('workspace_id')
+          .eq('id', boardId)
+          .single();
+
+        if (error || !board) return;
+
+        const { data: membership } = await supabaseAdmin
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', board.workspace_id)
+          .eq('user_id', socket.userId)
+          .single();
+
+        if (!membership) return;
+
+        // Broadcast to board members
+        socket.to(`board:${boardId}`).emit('task_updated', {
+          boardId,
           taskId,
           updates,
           updatedBy: socket.user
         });
 
       } catch (error) {
-        console.error('Task update error:', error);
-        socket.emit('error', { message: 'Failed to update task' });
+        console.error('Task updated broadcast error:', error);
+      }
+    });
+
+    socket.on('task_moved', async (data) => {
+      try {
+        const { boardId, taskId, sourceListId, destinationListId, sourceIndex, destinationIndex } = data;
+
+        // Verify access
+        const { data: board, error } = await supabaseAdmin
+          .from('task_boards')
+          .select('workspace_id')
+          .eq('id', boardId)
+          .single();
+
+        if (error || !board) return;
+
+        const { data: membership } = await supabaseAdmin
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', board.workspace_id)
+          .eq('user_id', socket.userId)
+          .single();
+
+        if (!membership) return;
+
+        // Broadcast to board members
+        socket.to(`board:${boardId}`).emit('task_moved', {
+          boardId,
+          taskId,
+          sourceListId,
+          destinationListId,
+          sourceIndex,
+          destinationIndex,
+          movedBy: socket.user
+        });
+
+      } catch (error) {
+        console.error('Task moved broadcast error:', error);
+      }
+    });
+
+    socket.on('task_deleted', async (data) => {
+      try {
+        const { boardId, taskId, listId } = data;
+
+        // Verify access
+        const { data: board, error } = await supabaseAdmin
+          .from('task_boards')
+          .select('workspace_id')
+          .eq('id', boardId)
+          .single();
+
+        if (error || !board) return;
+
+        const { data: membership } = await supabaseAdmin
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', board.workspace_id)
+          .eq('user_id', socket.userId)
+          .single();
+
+        if (!membership) return;
+
+        // Broadcast to board members
+        socket.to(`board:${boardId}`).emit('task_deleted', {
+          boardId,
+          taskId,
+          listId,
+          deletedBy: socket.user
+        });
+
+      } catch (error) {
+        console.error('Task deleted broadcast error:', error);
+      }
+    });
+
+    socket.on('list_created', async (data) => {
+      try {
+        const { boardId, list } = data;
+
+        // Verify access
+        const { data: board, error } = await supabaseAdmin
+          .from('task_boards')
+          .select('workspace_id')
+          .eq('id', boardId)
+          .single();
+
+        if (error || !board) return;
+
+        const { data: membership } = await supabaseAdmin
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', board.workspace_id)
+          .eq('user_id', socket.userId)
+          .single();
+
+        if (!membership) return;
+
+        // Broadcast to board members
+        socket.to(`board:${boardId}`).emit('list_created', {
+          boardId,
+          list,
+          createdBy: socket.user
+        });
+
+      } catch (error) {
+        console.error('List created broadcast error:', error);
       }
     });
 
@@ -259,6 +441,25 @@ const setupSocketHandlers = (io) => {
         userId: socket.userId,
         user: socket.user
       });
+    });
+
+    // Whiteboard realtime sync (Konva/canvas)
+    socket.on('wb_begin', (data) => {
+      const { workspaceId, x, y, color, size } = data || {};
+      if (!workspaceId) return;
+      socket.to(`workspace:${workspaceId}`).emit('wb_begin', { x, y, color, size });
+    });
+
+    socket.on('wb_draw', (data) => {
+      const { workspaceId, x, y } = data || {};
+      if (!workspaceId) return;
+      socket.to(`workspace:${workspaceId}`).emit('wb_draw', { x, y });
+    });
+
+    socket.on('wb_line', (data) => {
+      const { workspaceId, points, color, size } = data || {};
+      if (!workspaceId) return;
+      socket.to(`workspace:${workspaceId}`).emit('wb_line', { points, color, size });
     });
 
     // WebRTC signaling is now handled by webrtcHandlers.js
