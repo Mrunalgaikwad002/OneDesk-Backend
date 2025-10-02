@@ -8,6 +8,9 @@ const workspaceRooms = new Map(); // workspaceId -> Set of userIds
 const userPresence = new Map(); // userId -> { status, workspaceId, lastSeen }
 
 const setupSocketHandlers = (io) => {
+  // Setup WebRTC handlers
+  setupWebRTCHandlers(io);
+  
   // Authentication middleware for Socket.io
   io.use(async (socket, next) => {
     try {
@@ -46,6 +49,9 @@ const setupSocketHandlers = (io) => {
       activeConnections.set(socket.userId, new Set());
     }
     activeConnections.get(socket.userId).add(socket.id);
+
+    // Join user to their personal room for direct signaling
+    socket.join(`user:${socket.userId}`);
 
     // Join user to their workspaces
     socket.on('join_workspaces', async (workspaceIds) => {

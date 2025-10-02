@@ -12,6 +12,180 @@ const setupWebRTCHandlers = (io) => {
       socket.join(`user:${socket.userId}`);
     });
 
+    // Start a call (simplified for demo)
+    socket.on('start_call', async (data) => {
+      try {
+        const { callId, workspaceId, callType = 'group' } = data;
+        const userId = socket.userId;
+
+        // Verify user is in the workspace
+        const { data: membership, error } = await supabaseAdmin
+          .from('workspace_members')
+          .select('id')
+          .eq('workspace_id', workspaceId)
+          .eq('user_id', userId)
+          .single();
+
+        if (error || !membership) {
+          socket.emit('error', { message: 'Not a workspace member' });
+          return;
+        }
+
+        // Create call record
+        activeCalls.set(callId, {
+          participants: new Set([userId]),
+          workspaceId,
+          type: callType,
+          startedAt: new Date().toISOString(),
+          startedBy: userId
+        });
+
+        // Track user calls
+        if (!userCalls.has(userId)) userCalls.set(userId, new Set());
+        userCalls.get(userId).add(callId);
+
+        // Join socket to call room
+        socket.join(`call:${callId}`);
+
+        // Notify workspace members about new call
+        socket.to(`workspace:${workspaceId}`).emit('incoming_call', {
+          callId,
+          fromUser: socket.user,
+          participants: [userId],
+          workspaceId,
+          callType
+        });
+
+        console.log(`Call ${callId} started by ${socket.user.email} in workspace ${workspaceId}`);
+
+      } catch (error) {
+        console.error('Start call error:', error);
+        socket.emit('error', { message: 'Failed to start call' });
+      }
+    });
+
+    // Accept a call
+    socket.on('accept_call', (data) => {
+      try {
+        const { callId, workspaceId } = data;
+        const userId = socket.userId;
+
+        const call = activeCalls.get(callId);
+        if (!call) {
+          socket.emit('error', { message: 'Call not found' });
+          return;
+        }
+
+        // Add user to call
+        call.participants.add(userId);
+        
+        // Track user calls
+        if (!userCalls.has(userId)) userCalls.set(userId, new Set());
+        userCalls.get(userId).add(callId);
+
+        // Join socket to call room
+        socket.join(`call:${callId}`);
+
+        // Get current participants
+        const participants = Array.from(call.participants);
+
+        // Notify all participants that call was accepted
+        io.to(`call:${callId}`).emit('call_accepted', {
+          callId,
+          participants,
+          acceptedBy: userId,
+          acceptedByUser: socket.user
+        });
+
+        console.log(`Call ${callId} accepted by ${socket.user.email}`);
+
+      } catch (error) {
+        console.error('Accept call error:', error);
+        socket.emit('error', { message: 'Failed to accept call' });
+      }
+    });
+
+    // Reject a call
+    socket.on('reject_call', (data) => {
+      try {
+        const { callId, workspaceId } = data;
+        const userId = socket.userId;
+
+        // Notify caller that call was rejected
+        const call = activeCalls.get(callId);
+        if (call) {
+          call.participants.forEach(participantId => {
+            if (participantId !== userId) {
+              io.to(`user:${participantId}`).emit('call_rejected', {
+                callId,
+                rejectedBy: userId,
+                rejectedByUser: socket.user
+              });
+            }
+          });
+        }
+
+        console.log(`Call ${callId} rejected by ${socket.user.email}`);
+
+      } catch (error) {
+        console.error('Reject call error:', error);
+        socket.emit('error', { message: 'Failed to reject call' });
+      }
+    });
+
+    // End a call
+    socket.on('end_call', (data) => {
+      try {
+        const { callId, workspaceId } = data;
+        const userId = socket.userId;
+
+        const call = activeCalls.get(callId);
+        if (!call || !call.participants.has(userId)) {
+          socket.emit('error', { message: 'Call not found or access denied' });
+          return;
+        }
+
+        // Notify all participants that call ended
+        io.to(`call:${callId}`).emit('call_ended', {
+          callId,
+          endedBy: userId,
+          endedByUser: socket.user
+        });
+
+        // Clean up call
+        cleanupCall(callId);
+
+        console.log(`Call ${callId} ended by ${socket.user.email}`);
+
+      } catch (error) {
+        console.error('End call error:', error);
+        socket.emit('error', { message: 'Failed to end call' });
+      }
+    });
+
+    // Handle WebRTC signaling for simple-peer
+    socket.on('call_signal', (data) => {
+      try {
+        const { userToSignal, signal, workspaceId } = data;
+        const fromUser = socket.userId;
+
+        // Forward signal to target user
+        socket.to(`user:${userToSignal}`).emit('user_joined_call', {
+          userId: fromUser,
+          signal
+        });
+
+        // Also broadcast to call room if available
+        socket.to(`workspace:${workspaceId}`).emit('call_signal', {
+          signal,
+          fromUser
+        });
+
+      } catch (error) {
+        console.error('Call signal error:', error);
+      }
+    });
+
     // Start a video call
     socket.on('start_video_call', async (data) => {
       try {
