@@ -23,7 +23,11 @@ const server = http.createServer(app);
 // Socket.io setup
 const io = socketIo(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:3000",
+      "https://one-desk.netlify.app",
+      "http://localhost:3000"
+    ],
     methods: ["GET", "POST"],
     credentials: true
   }
@@ -32,7 +36,11 @@ const io = socketIo(server, {
 // Security middleware
 app.use(helmet());
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:3000",
+  origin: [
+    process.env.FRONTEND_URL || "http://localhost:3000",
+    "https://one-desk.netlify.app",
+    "http://localhost:3000"
+  ],
   credentials: true
 }));
 
