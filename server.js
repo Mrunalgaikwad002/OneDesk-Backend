@@ -20,34 +20,52 @@ const { setupYWebSocket } = require('./yjs/yWebSocketServer');
 const app = express();
 const server = http.createServer(app);
 
+// Compute allowed CORS origins from ENV (supports comma-separated list)
+const defaultOrigins = [
+  'http://localhost:3000',
+  'https://one-desk.netlify.app',
+  'https://one-desk-rust.vercel.app'
+];
+const envOrigins = (process.env.FRONTEND_URLS || process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const allowedOrigins = envOrigins.length ? envOrigins : defaultOrigins;
+
+// Build CORS options with explicit methods/headers and dynamic origin check
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true); // allow non-browser tools
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS'));
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  optionsSuccessStatus: 204
+};
+
 // Socket.io setup
 const io = socketIo(server, {
   cors: {
-    origin: [
-      process.env.FRONTEND_URL || "http://localhost:3000",
-      "https://one-desk.netlify.app",
-      "http://localhost:3000"
-    ],
-    methods: ["GET", "POST"],
+    origin: allowedOrigins,
+    methods: ['GET', 'POST'],
     credentials: true
   }
 });
 
 // Security middleware
 app.use(helmet());
-app.use(cors({
-  origin: [
-    process.env.FRONTEND_URL || "http://localhost:3000",
-    "https://one-desk.netlify.app",
-    "http://localhost:3000"
-  ],
-  credentials: true
-}));
 
-// Rate limiting
+// CORS (must be before routes)
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+// Rate limiting (skip preflight)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
+  max: 100, // limit each IP to 100 requests per windowMs
+  skip: (req) => req.method === 'OPTIONS'
 });
 app.use(limiter);
 
@@ -65,8 +83,8 @@ app.use('/api/documents', documentRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
-  res.json({ 
-    status: 'OK', 
+  res.json({
+    status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime()
   });
@@ -89,7 +107,7 @@ setupYWebSocket(server);
 // Error handling middleware
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).json({ 
+  res.status(500).json({
     error: 'Something went wrong!',
     message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
   });
@@ -107,9 +125,9 @@ server.listen(PORT, () => {
   console.log(`📡 Socket.io server ready for connections`);
   console.log(`📝 Y-WebSocket server ready for document collaboration`);
 
-  console.log("SUPABASE_URL:", process.env.SUPABASE_URL);
-console.log("SUPABASE_KEY:", process.env.SUPABASE_KEY ? "Loaded ✅" : "Missing ❌");
-
+  console.log('Allowed CORS origins:', allowedOrigins);
+  console.log('SUPABASE_URL:', process.env.SUPABASE_URL);
+  console.log('SUPABASE_KEY:', process.env.SUPABASE_KEY ? 'Loaded ✅' : 'Missing ❌');
 });
 
 module.exports = { app, server, io };
